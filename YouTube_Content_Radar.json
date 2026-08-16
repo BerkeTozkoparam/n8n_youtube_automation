@@ -1,0 +1,1072 @@
+{
+  "name": "YouTube Content Radar",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 11 * * *"
+            }
+          ]
+        }
+      },
+      "id": "n-cron",
+      "name": "Her Gun 11.00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1280,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "kanal_konusu",
+              "type": "string",
+              "value": "world war 2 and ancient history documentaries"
+            },
+            {
+              "id": "f2",
+              "name": "video_dili",
+              "type": "string",
+              "value": "en"
+            },
+            {
+              "id": "f3",
+              "name": "bolge_kodu",
+              "type": "string",
+              "value": "US"
+            },
+            {
+              "id": "f4",
+              "name": "haftalik_paylasim",
+              "type": "number",
+              "value": 3
+            },
+            {
+              "id": "f5",
+              "name": "arama_terimi_sayisi",
+              "type": "number",
+              "value": 4
+            },
+            {
+              "id": "f6",
+              "name": "min_izlenme",
+              "type": "number",
+              "value": 20000
+            },
+            {
+              "id": "f7",
+              "name": "min_sure_saniye",
+              "type": "number",
+              "value": 90
+            },
+            {
+              "id": "f8",
+              "name": "son_kac_gun",
+              "type": "number",
+              "value": 540
+            },
+            {
+              "id": "f9",
+              "name": "yedek_kategoriler",
+              "type": "string",
+              "value": "28,26,24"
+            },
+            {
+              "id": "f10",
+              "name": "yayin_saati",
+              "type": "string",
+              "value": "19:00"
+            },
+            {
+              "id": "f11",
+              "name": "youtube_api_key",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n-ayar",
+      "name": "Ayarlar",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1056,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Kanal konusu: {{ $json.kanal_konusu }}\nVideo dili: {{ $json.video_dili }}\nHedef bolge: {{ $json.bolge_kodu }}\n\nBu kanal icin YouTube aramasinda kullanilacak {{ $json.arama_terimi_sayisi }} adet yuksek potansiyelli arama sorgusu uret.",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Sen YouTube icerik arastirmasi konusunda uzman bir strateji uzmanisin. Kullanicinin belirttigi kanal konusu ve video diline gore, YouTube aramasinda dogrudan kullanilabilecek arama sorgulari uret. Sorgular video dilinde yazilmali, birbirinden farkli olmali ve gercek izleyici arama davranisini yansitmali. Uydurma istatistik verme. Yalnizca cikti semasina uygun sonuc dondur."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "n-terim",
+      "name": "Arama Terimleri Uret",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -848,
+        368
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "id": "n-gm1",
+      "name": "Gemini Terim Modeli",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"arama_terimleri\": [\n    \"world war 2 rare footage documentary\",\n    \"ancient rome engineering secrets\"\n  ]\n}"
+      },
+      "id": "n-sema1",
+      "name": "Terim Semasi",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -704,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Ayarlar').first().json;\nconst key = String(cfg.youtube_api_key || '').trim();\nif (!key) throw new Error('Ayarlar node icinde youtube_api_key bos.');\n\nconst bolge      = String(cfg.bolge_kodu || 'US').trim();\nconst dil        = String(cfg.video_dili || 'en').trim();\nconst minIzlenme = Number(cfg.min_izlenme || 0);\nconst minSure    = Number(cfg.min_sure_saniye || 90);\nconst sonGun     = Number(cfg.son_kac_gun || 540);\nconst terimAdedi = Math.max(1, Math.min(6, Number(cfg.arama_terimi_sayisi || 4)));\n\nconst yt = async (yol, qs) => await this.helpers.httpRequest({\n  method: 'GET',\n  url: 'https://www.googleapis.com/youtube/v3/' + yol,\n  qs: Object.assign({}, qs, { key }),\n  json: true,\n});\n\n// --- 1) Arama terimleri (Gemini ciktisi, yoksa kanal konusu) ---------------\nconst gelen = $input.first()?.json ?? {};\nlet terimler = gelen.output?.arama_terimleri ?? gelen.arama_terimleri ?? [];\nif (!Array.isArray(terimler)) terimler = [];\nterimler = terimler.map(t => String(t).trim()).filter(Boolean);\nif (terimler.length === 0 && cfg.kanal_konusu) terimler = [String(cfg.kanal_konusu).trim()];\nterimler = terimler.slice(0, terimAdedi);\n\n// --- 2) search.list (100 kota birimi / cagri) ------------------------------\nconst kaynak = new Map();          // videoId -> nereden geldi\nlet kotaDoldu = false;\nlet aramaSayisi = 0;\nconst yayinSonrasi = new Date(Date.now() - sonGun * 86400000).toISOString();\n\nfor (const terim of terimler) {\n  try {\n    const r = await yt('search', {\n      part: 'snippet', type: 'video', q: terim, maxResults: 15,\n      order: 'viewCount', regionCode: bolge, relevanceLanguage: dil,\n      publishedAfter: yayinSonrasi,\n    });\n    aramaSayisi++;\n    for (const it of (r.items || [])) {\n      const id = it.id?.videoId;\n      if (id && !kaynak.has(id)) kaynak.set(id, terim);\n    }\n  } catch (e) {\n    const m = String(e?.message ?? e);\n    if (m.includes('403') || m.includes('429') || /quota/i.test(m)) { kotaDoldu = true; break; }\n    // diger hatalarda o terimi atla\n  }\n}\n\n// --- 3) Kota dolduysa ucuz yedek: mostPopular (1 kota birimi / cagri) ------\n// Trend listesi konudan bagimsizdir, bu yuzden asagida konu filtresinden gecirilir.\nlet yedekKullanildi = false;\nif (kaynak.size === 0) {\n  yedekKullanildi = true;\n  const katlar = String(cfg.yedek_kategoriler || '28').split(',').map(s => s.trim()).filter(Boolean);\n  for (const kat of katlar) {\n    try {\n      const r = await yt('videos', {\n        part: 'id', chart: 'mostPopular', regionCode: bolge,\n        videoCategoryId: kat, maxResults: 50,\n      });\n      for (const it of (r.items || [])) {\n        if (it.id && !kaynak.has(it.id)) kaynak.set(it.id, 'Trend kategori ' + kat);\n      }\n    } catch (e) { /* desteklenmeyen kategori -> atla */ }\n  }\n}\n\nif (kaynak.size === 0) {\n  throw new Error(\n    'Hic video toplanamadi. Arama kotasi doldu mu: ' + kotaDoldu +\n    ' | terimler: ' + JSON.stringify(terimler) +\n    ' | YouTube arama kotasi gunde 10.000 birim, her arama 100 birim harcar ve ' +\n    'Pasifik saatiyle gece yarisi (TR ile 10.00) sifirlanir.'\n  );\n}\n\n// --- 3b) Konu uygunlugu (yalnizca yedek liste icin) ------------------------\nconst durakKelimeler = new Set([\n  'the','and','for','with','from','that','this','you','your','what','why','how',\n  'about','into','their','they','have','been','will','more','most','best','top',\n  'video','videos','channel','watch','full','part','episode','2024','2025','2026',\n]);\nconst anahtarlar = [...new Set(\n  (terimler.join(' ') + ' ' + String(cfg.kanal_konusu || ''))\n    .toLowerCase()\n    .replace(/[^a-z0-9çğıöşü]+/g, ' ')\n    .split(/\\s+/)\n    .filter(w => w.length >= 4 && !durakKelimeler.has(w))\n)];\n\nconst uygunlukPuani = (v) => {\n  if (!yedekKullanildi) return 1;              // arama sonuclari zaten konuya ozel\n  if (anahtarlar.length === 0) return 1;\n  const metin = ((v.snippet?.title ?? '') + ' ' + (v.snippet?.description ?? '')).toLowerCase();\n  return anahtarlar.filter(k => metin.includes(k)).length;\n};\n\n// --- 4) videos.list ile istatistikler (1 kota birimi / 50 video) ----------\nconst idler = [...kaynak.keys()];\nconst detay = [];\nfor (let i = 0; i < idler.length; i += 50) {\n  const r = await yt('videos', {\n    part: 'snippet,statistics,contentDetails',\n    id: idler.slice(i, i + 50).join(','),\n  });\n  detay.push(...(r.items || []));\n}\n\n// --- 5) Skorla + filtrele --------------------------------------------------\nconst isoSaniye = (iso) => {\n  const m = /^P(?:(\\d+)D)?T?(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?$/.exec(String(iso || ''));\n  if (!m) return 0;\n  return (+(m[1] || 0)) * 86400 + (+(m[2] || 0)) * 3600 + (+(m[3] || 0)) * 60 + (+(m[4] || 0));\n};\n\nconst simdi = Date.now();\nconst damga = String(simdi);\n\nconst cikti = detay.filter(v => uygunlukPuani(v) > 0).map((v) => {\n  const izlenme = Number(v.statistics?.viewCount ?? 0);\n  const begeni  = Number(v.statistics?.likeCount ?? 0);\n  const yorum   = Number(v.statistics?.commentCount ?? 0);\n  const yayin   = v.snippet?.publishedAt ?? '';\n  const gun     = yayin ? Math.max(1, Math.floor((simdi - new Date(yayin).getTime()) / 86400000)) : 1;\n  const gunluk  = Math.round(izlenme / gun);\n  const etkilesim = izlenme ? (begeni + yorum) / izlenme : 0;\n  return {\n    kayit_id: '',\n    arama_terimi: kaynak.get(v.id) ?? '',\n    video_id: v.id ?? '',\n    baslik: v.snippet?.title ?? '',\n    aciklama: String(v.snippet?.description ?? '').slice(0, 900),\n    video_url: v.id ? 'https://www.youtube.com/watch?v=' + v.id : '',\n    kucuk_resim_url: v.snippet?.thumbnails?.high?.url ?? v.snippet?.thumbnails?.default?.url ?? '',\n    kanal_adi: v.snippet?.channelTitle ?? '',\n    kanal_url: v.snippet?.channelId ? 'https://www.youtube.com/channel/' + v.snippet.channelId : '',\n    goruntulenme: izlenme,\n    begeni: begeni,\n    yorum: yorum,\n    sure_saniye: isoSaniye(v.contentDetails?.duration),\n    yayin_tarihi: yayin,\n    abone_sayisi: 0,\n    gunluk_ortalama_izlenme: gunluk,\n    etkilesim_orani: Number(etkilesim.toFixed(5)),\n    viral_skor: Math.round(gunluk * (1 + etkilesim * 10)),\n    analiz_tarihi: new Date().toISOString(),\n    durum: 'Analiz edildi',\n    video_konusu: cfg.kanal_konusu ?? '',\n    video_dili: dil,\n    haftalik_paylasim: Number(cfg.haftalik_paylasim || 3),\n  };\n})\n.filter(x => x.video_id && x.sure_saniye >= minSure && x.goruntulenme >= minIzlenme)\n.sort((a, b) => b.viral_skor - a.viral_skor);\n\nif (cikti.length === 0) {\n  throw new Error(\n    yedekKullanildi\n      ? 'Arama kotasi dolu oldugu icin trend listesine dusuldu, ancak \"' +\n        String(cfg.kanal_konusu || '') + '\" konusuyla alakali video bulunamadi. ' +\n        'Sayfaya alakasiz veri yazmamak icin durduruldu. Kota TR saatiyle 10.00 civari ' +\n        'sifirlanir, sonrasinda tekrar calistir.'\n      : 'Filtreleri gecen video kalmadi. Ayarlar node icinde min_izlenme (' + minIzlenme +\n        ') veya min_sure_saniye (' + minSure + ') degerlerini dusur.'\n  );\n}\n\nreturn cikti.map((json, i) => {\n  json.kayit_id = damga + '-' + (i + 1);\n  return { json };\n});"
+      },
+      "id": "n-topla",
+      "name": "YouTube Verisi Topla",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "filtersUI": {
+          "values": []
+        },
+        "options": {}
+      },
+      "id": "n-oku",
+      "name": "Analiz Sayfasini Oku",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -336,
+        368
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analiz sayfasinda zaten olan video_id'leri ele.\nconst mevcut = new Set(\n  $input.all()\n    .map(i => String(i.json?.video_id ?? '').trim())\n    .filter(Boolean)\n);\n\nconst yeni = $('YouTube Verisi Topla').all()\n  .filter(i => {\n    const id = String(i.json?.video_id ?? '').trim();\n    return id && !mevcut.has(id);\n  });\n\n// Ayni calistirmada tekrar eden id kalmasin\nconst gorulen = new Set();\nreturn yeni.filter(i => {\n  const id = i.json.video_id;\n  if (gorulen.has(id)) return false;\n  gorulen.add(id);\n  return true;\n});"
+      },
+      "id": "n-suz",
+      "name": "Yeni Videolari Suz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        368
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "kayit_id",
+              "displayName": "kayit_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "arama_terimi",
+              "displayName": "arama_terimi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "video_id",
+              "displayName": "video_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "baslik",
+              "displayName": "baslik",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "aciklama",
+              "displayName": "aciklama",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "video_url",
+              "displayName": "video_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "kucuk_resim_url",
+              "displayName": "kucuk_resim_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "kanal_adi",
+              "displayName": "kanal_adi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "kanal_url",
+              "displayName": "kanal_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "goruntulenme",
+              "displayName": "goruntulenme",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "begeni",
+              "displayName": "begeni",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "yorum",
+              "displayName": "yorum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sure_saniye",
+              "displayName": "sure_saniye",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "yayin_tarihi",
+              "displayName": "yayin_tarihi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "abone_sayisi",
+              "displayName": "abone_sayisi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "gunluk_ortalama_izlenme",
+              "displayName": "gunluk_ortalama_izlenme",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "etkilesim_orani",
+              "displayName": "etkilesim_orani",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "viral_skor",
+              "displayName": "viral_skor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "analiz_tarihi",
+              "displayName": "analiz_tarihi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "durum",
+              "displayName": "durum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "video_konusu",
+              "displayName": "video_konusu",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "video_dili",
+              "displayName": "video_dili",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "haftalik_paylasim",
+              "displayName": "haftalik_paylasim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "n-ekle1",
+      "name": "Analizlere Ekle",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        96,
+        368
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Ayarlar').first().json;\n\nconst enIyiler = $('Yeni Videolari Suz').all()\n  .sort((a, b) => Number(b.json.viral_skor ?? 0) - Number(a.json.viral_skor ?? 0))\n  .slice(0, 5);\n\nconst referanslar = enIyiler.map((it, i) => {\n  const v = it.json;\n  return [\n    'REFERANS ' + (i + 1),\n    'Baslik: ' + (v.baslik ?? ''),\n    'Kanal: ' + (v.kanal_adi ?? ''),\n    'Goruntulenme: ' + (v.goruntulenme ?? 0),\n    'Gunluk ortalama izlenme: ' + (v.gunluk_ortalama_izlenme ?? 0),\n    'Etkilesim orani: ' + (v.etkilesim_orani ?? 0),\n    'Viral skor: ' + (v.viral_skor ?? 0),\n    'Sure (sn): ' + (v.sure_saniye ?? 0),\n    'Aciklama: ' + String(v.aciklama ?? '').slice(0, 400),\n  ].join('\\n');\n}).join('\\n\\n');\n\nreturn [{\n  json: {\n    kanal_konusu: cfg.kanal_konusu ?? '',\n    video_dili: cfg.video_dili ?? 'en',\n    haftalik_paylasim: Number(cfg.haftalik_paylasim || 3),\n    yeni_video_sayisi: $('Yeni Videolari Suz').all().length,\n    referanslar,\n  },\n}];"
+      },
+      "id": "n-ref",
+      "name": "En Iyi Referanslari Sec",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Kanal konusu: {{ $json.kanal_konusu }}\nVideo dili: {{ $json.video_dili }}\nUretilecek video sayisi: {{ $json.haftalik_paylasim }}\n\nAsagida bu hafta one cikan referans videolar var. Bunlari yalnizca izleyici ilgisini anlamak icin kullan.\n\n{{ $json.referanslar }}\n\nTam {{ $json.haftalik_paylasim }} adet ozgun video fikri uret.",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Sen deneyimli bir YouTube icerik yoneticisi ve senaristsin. Referans videolarin baslik, metin veya kurgusunu KOPYALAMA; sadece hangi konularin ilgi cektigini anlamak icin kullan. Her fikir icin ozgun bir baslik, kisa aciklama, videonun ozgun acisi (video_fikri), anahtar kelimeler, hedef kitle ve tahmini sure uret. Basliklar ve aciklamalar belirtilen video dilinde olmalidir. Clickbait ama yaniltici olmayan basliklar yaz. Tarih yazma, tarihleri sistem belirleyecek. Yalnizca cikti semasina uygun sonuc dondur."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "n-plan",
+      "name": "Icerik Plani Uret",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        544,
+        368
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "id": "n-gm2",
+      "name": "Gemini Plan Modeli",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        512,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"haftalik_plan\": [\n    {\n      \"baslik\": \"The Forgotten Machine That Won a War\",\n      \"aciklama\": \"Kisa video aciklamasi (2-3 cumle).\",\n      \"video_fikri\": \"Videonun ozgun acisi ve neden farkli oldugu.\",\n      \"anahtar_kelimeler\": [\n        \"ww2\",\n        \"engineering\",\n        \"history\"\n      ],\n      \"hedef_kitle\": \"Tarih ve teknoloji meraklilari\",\n      \"tahmini_sure_dakika\": 8\n    }\n  ]\n}"
+      },
+      "id": "n-sema2",
+      "name": "Plan Semasi",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        688,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Ayarlar').first().json;\nconst plan = $json.output?.haftalik_plan ?? $json.haftalik_plan ?? [];\nif (!Array.isArray(plan) || plan.length === 0) {\n  throw new Error('Gemini haftalik_plan uretmedi: ' + JSON.stringify($json).slice(0, 400));\n}\n\nconst adet = plan.length;\nconst damga = String(Date.now());\nconst simdi = new Date().toISOString();\n\n// Yayin tarihlerini burada hesapliyoruz; LLM tarih uydurmasin.\nconst ggaayyyy = (d) => {\n  const p = new Intl.DateTimeFormat('tr-TR', {\n    timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', year: 'numeric',\n  }).formatToParts(d).reduce((a, x) => (a[x.type] = x.value, a), {});\n  return p.day + '-' + p.month + '-' + p.year;\n};\n\nconst adim = Math.max(1, Math.floor(7 / adet));\n\nreturn plan.map((p, i) => {\n  const tarih = new Date(Date.now() + (adim * (i + 1)) * 86400000);\n  return {\n    json: {\n      kayit_id: damga + '-' + (i + 1),\n      video_konusu: cfg.kanal_konusu ?? '',\n      video_dili: cfg.video_dili ?? 'en',\n      video_fikri: String(p.video_fikri ?? p.ozgunluk_farki ?? '').slice(0, 900),\n      olusturma_tarihi: simdi,\n      icerik_id: damga + '-' + (i + 1),\n      yayin_tarihi: ggaayyyy(tarih),\n      baslik: String(p.baslik ?? '').slice(0, 300),\n      aciklama: String(p.aciklama ?? '').slice(0, 900),\n      anahtar_kelimeler: Array.isArray(p.anahtar_kelimeler)\n        ? p.anahtar_kelimeler.join(', ')\n        : String(p.anahtar_kelimeler ?? ''),\n      hedef_kitle: String(p.hedef_kitle ?? ''),\n      tahmini_sure_dakika: Number(p.tahmini_sure_dakika ?? 8),\n      onaylandi: false,\n      durum: 'Planlandi',\n      yayin_saati: String(cfg.yayin_saati || '19:00'),\n      sahne_sayisi: 41,\n      guncelleme_tarihi: simdi,\n    },\n  };\n});"
+      },
+      "id": "n-satir",
+      "name": "Plani Satirlara Ayir",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "kayit_id",
+              "displayName": "kayit_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "video_konusu",
+              "displayName": "video_konusu",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "video_dili",
+              "displayName": "video_dili",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "video_fikri",
+              "displayName": "video_fikri",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "olusturma_tarihi",
+              "displayName": "olusturma_tarihi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "icerik_id",
+              "displayName": "icerik_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "yayin_tarihi",
+              "displayName": "yayin_tarihi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "baslik",
+              "displayName": "baslik",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "aciklama",
+              "displayName": "aciklama",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "anahtar_kelimeler",
+              "displayName": "anahtar_kelimeler",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "hedef_kitle",
+              "displayName": "hedef_kitle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "tahmini_sure_dakika",
+              "displayName": "tahmini_sure_dakika",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "onaylandi",
+              "displayName": "onaylandi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "durum",
+              "displayName": "durum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "yayin_saati",
+              "displayName": "yayin_saati",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sahne_sayisi",
+              "displayName": "sahne_sayisi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "guncelleme_tarihi",
+              "displayName": "guncelleme_tarihi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "n-ekle2",
+      "name": "Takvime Ekle",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1040,
+        368
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## 1) AYARLAR\nDegistirmek isteyecegin tek yer burasi.\n\n- **kanal_konusu / video_dili / bolge_kodu**: kanalinin konusu ve hedef kitlesi\n- **haftalik_paylasim**: kac video fikri uretilsin\n- **arama_terimi_sayisi**: her calistirmada kac YouTube aramasi yapilsin\n  (her arama **100 kota birimi**, gunluk limit 10.000 -> 4 arama = 400 birim, guvenli)\n- **min_izlenme / min_sure_saniye**: zayif ve Shorts videolari eler\n\nGunluk otomatik calisma saati **11.00**. Kota Pasifik saatiyle gece yarisi, yani TR ile 10.00 civari sifirlanir.",
+        "height": 400,
+        "width": 480,
+        "color": 5
+      },
+      "id": "Not Ayarlar",
+      "name": "Not Ayarlar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1328,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2) VIDEO TOPLAMA\n`search.list` ile konuya ozel arama yapar.\n\nKota dolmussa otomatik olarak **mostPopular** trend listesine duser (1 birim) — workflow patlamaz.\n\nSonra `videos.list` ile izlenme/begeni/yorum ceker ve **viral_skor** hesaplar:\n`gunluk_izlenme x (1 + etkilesim x 10)`",
+        "height": 400,
+        "width": 420,
+        "color": 4
+      },
+      "id": "Not Toplama",
+      "name": "Not Toplama",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -800,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3) SHEETS\n**Analizler** sayfasindan mevcut `video_id`ler okunur, tekrar eden videolar elenir. Sadece **yeni** videolar eklenir.\n\nYeni video yoksa akis burada sessizce durur (hata degil).",
+        "height": 400,
+        "width": 420,
+        "color": 3
+      },
+      "id": "Not Sheets",
+      "name": "Not Sheets",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4) ICERIK PLANI\nEn yuksek viral skorlu 5 video referans olarak Gemini'ye verilir ve **ozgun** fikirler uretilir (kopya degil).\n\nYayin tarihleri LLM'e birakilmaz, kod hesaplar (Europe/Istanbul).\n\n**Icerik Takvimi** sayfasina `onaylandi = FALSE` olarak yazilir. Begendiklerini elle TRUE yap.",
+        "height": 400,
+        "width": 480,
+        "color": 6
+      },
+      "id": "Not Plan",
+      "name": "Not Plan",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        512,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ! GUVENLIK\nYouTube API anahtari bu workflow icinde acik yaziyor ve sohbette paylasildi.\n\n**Google Cloud > Credentials** uzerinden anahtari **yenile (rotate)** ve\n**API restriction = YouTube Data API v3** olarak sinirla.\nSonra yeni anahtari Ayarlar node icine yapistir.",
+        "height": 260,
+        "width": 400,
+        "color": 2
+      },
+      "id": "Not Guvenlik",
+      "name": "Not Guvenlik",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "Youtube için video başlıkları araştırıldı :)",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1264,
+        368
+      ],
+      "id": "3a2416f5-563e-441f-983b-3179725eeb02",
+      "name": "Send a text message",
+      "webhookId": "ec8f1c18-f4e5-4358-a5be-e0406ac7280b"
+    },
+    {
+      "parameters": {},
+      "id": "n-manual",
+      "name": "Manuel Baslat",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1296,
+        320
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Her Gun 11.00": {
+      "main": [
+        [
+          {
+            "node": "Ayarlar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ayarlar": {
+      "main": [
+        [
+          {
+            "node": "Arama Terimleri Uret",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Terim Modeli": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Arama Terimleri Uret",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Terim Semasi": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Arama Terimleri Uret",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Arama Terimleri Uret": {
+      "main": [
+        [
+          {
+            "node": "YouTube Verisi Topla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Verisi Topla": {
+      "main": [
+        [
+          {
+            "node": "Analiz Sayfasini Oku",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analiz Sayfasini Oku": {
+      "main": [
+        [
+          {
+            "node": "Yeni Videolari Suz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Yeni Videolari Suz": {
+      "main": [
+        [
+          {
+            "node": "Analizlere Ekle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analizlere Ekle": {
+      "main": [
+        [
+          {
+            "node": "En Iyi Referanslari Sec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "En Iyi Referanslari Sec": {
+      "main": [
+        [
+          {
+            "node": "Icerik Plani Uret",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Plan Modeli": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Icerik Plani Uret",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Semasi": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Icerik Plani Uret",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Icerik Plani Uret": {
+      "main": [
+        [
+          {
+            "node": "Plani Satirlara Ayir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plani Satirlara Ayir": {
+      "main": [
+        [
+          {
+            "node": "Takvime Ekle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Takvime Ekle": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manuel Baslat": {
+      "main": [
+        [
+          {
+            "node": "Ayarlar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timezone": "Europe/Istanbul",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "versionId": "38d9e1f9-f427-4300-8033-068e05c96b40",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fdc024548a244a8e3f9b9b0535936a1b2860da5dc71431ed9869938d6d32140a"
+  },
+  "nodeGroups": [],
+  "id": "YTRadarKisisel01",
+  "tags": []
+}
